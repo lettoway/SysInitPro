@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>SysInitPro v9.0</title>
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="brand-header">
+        <div class="logo-icon">⚡</div>
+        <div>
+          <div class="logo-title">SysInitPro</div>
+          <div class="logo-sub">v9.0 全栈装机与运维台</div>
+        </div>
+      </div>
+
+      <div class="nav-group-title">本机与系统初始化</div>
+      <nav id="main-nav">
+        <button class="nav-btn active" data-step="1"><span class="nav-dot">1</span> 硬件与形态识别</button>
+        <button class="nav-btn" data-step="2"><span class="nav-dot">2</span> 系统补丁与调优</button>
+        <button class="nav-btn" data-step="3"><span class="nav-dot">3</span> 跨平台软件与环境</button>
+        <button class="nav-btn" data-step="4"><span class="nav-dot">4</span> 剧本翻译与执行</button>
+        <div class="nav-group-title" style="margin-top:10px;">远程服务器与软路由</div>
+        <button class="nav-btn" data-step="5"><span class="nav-dot">🛡️</span> VPS 加固与代理部署</button>
+        <button class="nav-btn" data-step="6"><span class="nav-dot">🌐</span> OpenWrt 固件编译</button>
+        <button class="nav-btn" data-step="7"><span class="nav-dot">🏠</span> PVE 软路由编排</button>
+      </nav>
+
+      <div class="gist-box">
+        <div style="font-size:11px; color:#94a3b8; margin-bottom:5px; font-weight:600;">☁️ GitHub Gist 私有云同步</div>
+        <input type="password" id="gist-token" placeholder="GitHub Token (gist 权限)" class="ui-input w-full" style="margin-bottom:5px; padding:5px 8px; font-size:11.5px;" />
+        <input type="text" id="gist-id" placeholder="Gist ID (自动记住)" class="ui-input w-full persist-field" style="margin-bottom:6px; padding:5px 8px; font-size:11.5px;" />
+        <div style="display:flex; gap:5px;">
+          <button id="btn-gist-push" class="action-btn" style="flex:1; padding:5px; font-size:11px;">☁️ 备份</button>
+          <button id="btn-gist-pull" class="action-btn" style="flex:1; padding:5px; font-size:11px;">📥 恢复</button>
+        </div>
+      </div>
+
+      <div class="profile-actions">
+        <button id="btn-import">📂 导入</button>
+        <button id="btn-export">💾 导出</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- 1. 硬件检测 -->
+      <section id="step-1" class="step-panel active">
+        <div class="page-header">
+          <div><h2>硬件检测与运行形态识别</h2><p class="page-desc">自动识别系统角色、硬件信息与前置权限/磁盘空间</p></div>
+          <div style="display:flex; gap:8px; align-items:center;"><button id="btn-check-integrity" class="action-btn">校验代码完整性</button><button id="btn-refresh-manifest" class="action-btn">刷新基准清单</button><span id="os-badge" class="badge badge-blue">探测中...</span></div>
+        </div>
+        <div id="hw-card" class="card glass-card">正在扫描本机硬件信息...</div>
+<pre id="integrity-console" class="console" style="height:110px; margin-bottom:11px; display:none;"></pre>
+        <div class="card flex-between">
+          <div><b>目标运行形态</b><p class="sub-text">支持桌面工作站与无界面服务器 CLI 模式</p></div>
+          <select id="os-role-select" class="ui-input" style="width:220px;">
+            <option value="desktop">🖥️ 桌面工作站版 (Desktop)</option>
+            <option value="server">🖧 生产服务器版 (Server / CLI)</option>
+          </select>
+        </div>
+        <label class="checkbox-card"><input type="checkbox" id="chk-drivers" checked /><span id="driver-label">自动前往官方源安装最新硬件驱动</span></label>
+      </section>
+
+      <!-- 2. 系统补丁与调优 -->
+      <section id="step-2" class="step-panel">
+        <div class="page-header">
+          <div><h2>🛡️ 系统补丁扫描、分级更新与调优</h2><p class="page-desc">先扫描查看待安装补丁列表，支持仅装安全补丁（禁止自动重启）</p></div>
+        </div>
+
+        <div class="card">
+          <div class="flex-between" style="margin-bottom:8px;">
+            <h4 class="card-title" style="color:#38bdf8; margin:0;">系统补丁管理 (Windows KB / Linux Security / macOS)</h4>
+            <div style="display:flex; gap:8px;">
+              <button id="btn-scan-patches" class="action-btn">🔍 扫描待安装补丁</button>
+              <button id="btn-install-patches" class="btn-primary-sm" style="background:#10b981;">⚡ 立即安装选定级别补丁</button>
+            </div>
+          </div>
+          <div style="display:flex; gap:18px; font-size:13px; margin-bottom:8px;">
+            <label class="inline-check"><input type="checkbox" id="chk-os-update" checked /> 装机流水线中包含系统补丁更新</label>
+            <label class="inline-check"><input type="checkbox" id="chk-sec-only" checked /> <b>仅安装安全与质量补丁</b>（排除大版本功能更新，不自动重启）</label>
+          </div>
+          <pre id="patch-console" class="console" style="height:105px; display:none;"></pre>
+        </div>
+
+        <div class="grid-3">
+          <label class="checkbox-card"><input type="checkbox" id="chk-backup" checked /><span><b>自动系统备份</b><br/><small class="sub-text">还原点 / Timeshift</small></span></label>
+          <label class="checkbox-card"><input type="checkbox" id="chk-runtimes" checked /><span><b>基础运行库补齐</b><br/><small class="sub-text">VC++ / .NET / build-essential</small></span></label>
+          <label class="checkbox-card"><input type="checkbox" id="win-no-hibernate" /><span><b>Windows 关闭休眠</b><br/><small class="sub-text">释放 C 盘休眠文件空间</small></span></label>
+        </div>
+
+        <div class="card" id="dynamic-opt-card"></div>
+
+        <div class="card">
+          <h4 class="card-title">网络、主机名与 Tailscale 组网参数</h4>
+          <div class="grid-3" style="margin-bottom:8px;">
+            <input type="text" id="net-hostname" placeholder="自定义主机名" class="ui-input persist-field" />
+            <input type="number" id="net-swap" value="2" placeholder="Linux Swap (GB)" class="ui-input" />
+            <input type="text" id="net-ssh-port" placeholder="Linux 自定义 SSH 端口" class="ui-input" />
+          </div>
+          <div class="grid-3">
+            <input type="password" id="ts-authkey" placeholder="Tailscale Auth Key (不落盘)" class="ui-input" />
+            <input type="text" id="ts-routes" placeholder="子网路由网段 (如 192.168.1.0/24)" class="ui-input persist-field" />
+            <label class="inline-check"><input type="checkbox" id="ts-exit-node" /> 声明为 Exit Node</label>
+          </div>
+        </div>
+
+        <div class="card" style="display:flex; gap:8px;">
+          <input type="text" id="win-product-key" placeholder="Windows 25 位官方正版产品密钥" class="ui-input" style="flex:1;" />
+          <button id="btn-activate-key" class="action-btn">🔑 官方密钥激活</button>
+        </div>
+      </section>
+
+      <!-- 3. 软件与环境 -->
+      <section id="step-3" class="step-panel">
+        <div class="page-header">
+          <div><h2>跨平台软件与开发环境</h2><p class="page-desc">内置 GitHub Desktop、Winget/Brew/Apt/Dnf/Pacman 全平台映射</p></div>
+          <div style="display:flex; gap:8px;">
+            <button id="btn-import-local" class="action-btn">📥 提取本机已装软件</button>
+            <button id="btn-toggle-add" class="btn-primary-sm">+ 添加软件</button>
+          </div>
+        </div>
+
+        <div id="add-panel" class="card highlight-border" style="display:none;">
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="new-sw-name" placeholder="显示名称" class="ui-input" />
+            <select id="new-sw-cat" class="ui-input"><option value="Tool">常用工具</option><option value="DevEnv">编程环境</option></select>
+            <input type="text" id="new-sw-bin" placeholder="检测命令名" class="ui-input" />
+            <input type="text" id="new-pkg-winget" placeholder="Winget ID" class="ui-input" />
+          </div>
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="new-pkg-brew" placeholder="Brew 包名" class="ui-input" />
+            <input type="text" id="new-pkg-apt" placeholder="Apt 包名" class="ui-input" />
+            <input type="text" id="new-pkg-dnf" placeholder="Dnf 包名" class="ui-input" />
+            <input type="text" id="new-pkg-pacman" placeholder="Pacman 包名" class="ui-input" />
+          </div>
+          <div class="flex-between">
+            <div style="display:flex; gap:6px; flex:1; margin-right:10px;">
+              <input type="text" id="search-kw" placeholder="检索本机官方源包 ID..." class="ui-input" style="flex:1;" />
+              <button id="btn-search-pkg" class="action-btn">🔍 检索</button>
+            </div>
+            <button id="btn-confirm-add" class="btn-primary-sm">确认添加</button>
+          </div>
+          <pre id="search-result" class="console" style="height:80px; display:none; margin-top:8px;"></pre>
+        </div>
+
+        <div class="card">
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="dev-git-name" placeholder="Git user.name" class="ui-input persist-field" />
+            <input type="text" id="dev-git-email" placeholder="Git user.email" class="ui-input persist-field" />
+            <input type="text" id="dev-git-proxy" placeholder="Git 代理端口" class="ui-input persist-field" />
+            <input type="text" id="dev-go-private" placeholder="GOPRIVATE" class="ui-input persist-field" />
+          </div>
+          <div class="flex-between">
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="mirror-select" class="ui-input" style="width:240px;"></select>
+              <button id="btn-retest-mirror" class="action-btn">测速优选</button>
+            </div>
+            <input type="text" id="dev-docker-mirror" placeholder="Docker 镜像加速地址" class="ui-input persist-field" style="width:300px;" />
+          </div>
+        </div>
+        <div class="software-grid" id="software-list"></div>
+      </section>
+
+      <!-- 4. 剧本翻译与执行 -->
+      <section id="step-4" class="step-panel">
+        <div class="page-header">
+          <div><h2>全量剧本翻译、执行与体检</h2><p class="page-desc">内置前置预检与装后版本验收</p></div>
+          <div style="display:flex; gap:8px; align-items:center;"><button id="btn-check-integrity-step4" class="action-btn">校验代码完整性</button><button id="btn-verify-env" class="action-btn">🩺 立即环境体检</button></div>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <button id="btn-preview-playbook" class="action-btn" style="flex:1;">👁️ 预览原生脚本</button>
+          <button id="btn-export-playbook" class="action-btn" style="flex:1;">📜 导出离线脚本</button>
+          <button id="btn-start" class="primary-btn" style="flex:2; margin:0;">🚀 立即在本机执行初始化流水线</button>
+        </div>
+        <div class="progress-wrapper"><div id="progress-bar" class="progress-fill" style="width:0%"></div></div>
+        <pre id="log-console" class="console">就绪。</pre>
+      </section>
+
+      <!-- 5. VPS 加固与 Sing-box -->
+      <section id="step-5" class="step-panel">
+        <div class="page-header">
+          <div><h2>🛡️ VPS 零信任加固与 Sing-box 远程部署</h2><p class="page-desc">直读 ~/.ssh/config 免密资产、防锁死 SSH 加固、节点解析与远程推送</p></div>
+          <div style="display:flex; gap:6px;">
+            <select id="ssh-host-select" class="ui-input" style="width:210px;"><option value="">-- 选择 ~/.ssh/config 主机 --</option></select>
+            <button id="btn-refresh-hosts" class="action-btn">🔄</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="vps-alias" placeholder="本机 SSH 别名" class="ui-input persist-field" />
+            <input type="text" id="vps-ip" placeholder="服务器公网 IP" class="ui-input persist-field" />
+            <input type="text" id="vps-init-user" value="root" placeholder="登录用户" class="ui-input persist-field" />
+            <input type="password" id="vps-init-pass" placeholder="密码 (配私钥可留空)" class="ui-input" />
+          </div>
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="vps-old-port" value="22" placeholder="当前 SSH 端口" class="ui-input" />
+            <input type="text" id="vps-new-port" value="26547" placeholder="新安全端口" class="ui-input persist-field" />
+            <input type="text" id="vps-new-user" value="deer" placeholder="新免密 sudo 用户" class="ui-input persist-field" />
+            <input type="text" id="vps-extra-ports" value="80/tcp 443/tcp 443/udp" placeholder="UFW 额外放行端口" class="ui-input persist-field" />
+          </div>
+          <div class="flex-between">
+            <div style="display:flex; gap:12px; font-size:12.5px;">
+              <label class="inline-check"><input type="checkbox" id="vps-no-root" checked /> 禁 root</label>
+              <label class="inline-check"><input type="checkbox" id="vps-no-pass" checked /> 禁密码</label>
+              <label class="inline-check"><input type="checkbox" id="vps-ufw" checked /> 开 UFW</label>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button id="btn-vps-status" class="action-btn">🩺 远程状态</button>
+              <button id="btn-vps-preview" class="action-btn">👁️ 预览加固</button>
+              <button id="btn-vps-run" class="btn-primary-sm" style="background:#10b981;">🚀 执行加固</button>
+            </div>
+          </div>
+          <pre id="vps-output" class="console" style="height:110px; margin-top:8px; display:none;"></pre>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <input type="text" id="sb-uri-input" placeholder="粘贴 vless:// / hysteria2:// / trojan:// / ss:// 链接一键解析..." class="ui-input" style="flex:1;" />
+            <button id="btn-sb-parse" class="btn-primary-sm" style="background:#8b5cf6;">✨ 解析填表</button>
+          </div>
+          <div class="grid-4" style="margin-bottom:8px;">
+            <select id="sb-in-mode" class="ui-input"><option value="mixed">Mixed 端口</option><option value="tun">TUN 透明网关</option></select>
+            <input type="number" id="sb-in-port" value="7890" class="ui-input" />
+            <select id="sb-proto" class="ui-input"><option value="vless">VLESS</option><option value="hysteria2">Hysteria2</option><option value="trojan">Trojan</option><option value="shadowsocks">SS-2022</option></select>
+            <label class="inline-check"><input type="checkbox" id="sb-allow-lan" /> 允许局域网</label>
+          </div>
+          <div class="grid-3" style="margin-bottom:8px;">
+            <input type="text" id="sb-server" placeholder="节点地址" class="ui-input" />
+            <input type="number" id="sb-port" value="443" class="ui-input" />
+            <input type="text" id="sb-uuid" placeholder="UUID / 密码" class="ui-input" />
+          </div>
+          <div class="grid-3" style="margin-bottom:8px;">
+            <input type="text" id="sb-sni" value="www.apple.com" placeholder="SNI" class="ui-input" />
+            <input type="text" id="sb-pbk" placeholder="Reality Public Key" class="ui-input" />
+            <input type="text" id="sb-sid" placeholder="Short ID" class="ui-input" />
+          </div>
+          <div class="flex-between">
+            <div style="display:flex; gap:10px; font-size:12px;">
+              <label class="inline-check"><input type="checkbox" id="sb-bypass-cn" checked /> 国内直连</label>
+              <label class="inline-check"><input type="checkbox" id="sb-ai-filter" checked /> AI 分流</label>
+              <label class="inline-check"><input type="checkbox" id="sb-warp-ai" /> AI 走 WARP</label>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button id="btn-sb-preview" class="action-btn">👁️ 预览 JSON</button>
+              <button id="btn-sb-export" class="action-btn">💾 导出</button>
+              <button id="btn-sb-deploy" class="btn-primary-sm" style="background:#10b981;">🚀 推送至 VPS 启动</button>
+            </div>
+          </div>
+          <pre id="sb-preview-box" class="console" style="height:125px; margin-top:8px; display:none;"></pre>
+        </div>
+      </section>
+
+      <!-- 6. OpenWrt 固件编译 -->
+      <section id="step-6" class="step-panel">
+        <div class="page-header">
+          <div><h2>🌐 OpenWrt 固件双引擎编译与 SSH 初始化</h2><p class="page-desc">内置 40GB 磁盘前置预检与 Docker 自动安装引导</p></div>
+        </div>
+        <div class="card">
+          <div class="grid-4" style="margin-bottom:8px;">
+            <select id="ow-branch" class="ui-input"><option value="immortalwrt">ImmortalWrt</option><option value="openwrt">Official OpenWrt</option><option value="lede">LEDE</option></select>
+            <select id="ow-arch" class="ui-input"><option value="x86_64">x86_64</option><option value="mediatek_filogic">MT798x ARM64</option><option value="rockchip_armv8">Rockchip ARM64</option></select>
+            <select id="ow-feed" class="ui-input"><option value="official">🌐 官方默认源</option><option value="tsinghua">清华镜像源</option><option value="ustc">中科大镜像源</option></select>
+            <select id="ow-theme" class="ui-input"><option value="luci-theme-argon">Argon 主题</option><option value="luci-theme-bootstrap">Bootstrap</option></select>
+          </div>
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="ow-ip" value="192.168.1.1" class="ui-input persist-field" />
+            <input type="text" id="ow-hostname" value="ImmortalWrt" class="ui-input persist-field" />
+            <label class="inline-check"><input type="checkbox" class="ow-tp" value="kenzok8" /> kenzok8 插件源</label>
+            <label class="inline-check"><input type="checkbox" class="ow-tp" value="istore" /> iStore 商店源</label>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button id="btn-ow-preview" class="action-btn">👁️ 预览脚本</button>
+            <button id="btn-ow-export" class="action-btn">📦 导出工程包</button>
+            <button id="btn-ow-docker" class="btn-primary-sm" style="background:#0284c7;">🐳 本机 Docker 编译</button>
+          </div>
+          <div class="sub-box flex-between" style="gap:8px;">
+            <input type="text" id="gh-repo" placeholder="GitHub 仓库 (用户名/仓库)" class="ui-input persist-field" style="width:220px;" />
+            <input type="password" id="gh-token" placeholder="GitHub Token (repo + workflow)" class="ui-input" style="flex:1;" />
+            <button id="btn-ow-gh-push" class="btn-primary-sm" style="background:#10b981;">☁️ 推送触发云编译</button>
+          </div>
+          <pre id="ow-script-preview" class="console" style="height:125px; margin-top:8px; display:none;"></pre>
+        </div>
+
+        <div class="card">
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="ssh-host" value="192.168.1.2" placeholder="OpenWrt IP" class="ui-input persist-field" />
+            <input type="password" id="ssh-pass" placeholder="root 密码 (配私钥可留空)" class="ui-input" />
+            <input type="text" id="ssh-gw" value="192.168.1.1" placeholder="旁路由主网关 IP" class="ui-input persist-field" />
+            <input type="text" id="ssh-pkgs" placeholder="安装插件 (空格分隔)" class="ui-input" />
+          </div>
+          <div class="flex-between">
+            <label class="inline-check"><input type="checkbox" id="ssh-bypass" /> 旁路由模式（关 DHCP 指主网关）</label>
+            <button id="btn-ow-ssh" class="action-btn">🚀 SSH 直连初始化 OpenWrt</button>
+          </div>
+          <pre id="ow-ssh-output" class="console" style="height:90px; margin-top:8px; display:none;"></pre>
+        </div>
+      </section>
+
+      <!-- 7. PVE 软路由编排中心 -->
+      <section id="step-7" class="step-panel">
+        <div class="page-header">
+          <div><h2>🏠 PVE 宿主机与软路由集群编排 (iKuai + OpenWrt + Zorin OS)</h2><p class="page-desc">宿主机无订阅源更新、启动顺序锁定、OpenWrt 固件快照直推升级与 SubBoost 部署</p></div>
+        </div>
+
+        <div class="card">
+          <h4 class="card-title" style="color:#38bdf8;">一、 集群拓扑与 SSH 连接（非敏感参数自动持久化保存）</h4>
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="pve-host" value="192.168.1.10" placeholder="PVE 宿主机 IP" class="ui-input persist-field" />
+            <input type="password" id="pve-pass" placeholder="PVE root 密码 (私钥可留空)" class="ui-input" />
+            <input type="text" id="pve-ikuai-id" value="100" placeholder="iKuai VMID" class="ui-input persist-field" />
+            <input type="text" id="pve-ow-id" value="101" placeholder="OpenWrt VMID" class="ui-input persist-field" />
+          </div>
+          <div class="grid-4" style="margin-bottom:8px;">
+            <input type="text" id="pve-ow-ip" value="192.168.1.2" placeholder="OpenWrt SSH IP" class="ui-input persist-field" />
+            <input type="password" id="pve-ow-pass" placeholder="OpenWrt root 密码" class="ui-input" />
+            <input type="text" id="pve-zorin-id" value="102" placeholder="Zorin OS VMID" class="ui-input persist-field" />
+            <input type="text" id="pve-zorin-ip" value="192.168.1.3" placeholder="Zorin OS IP" class="ui-input persist-field" />
+          </div>
+          <div class="grid-4" style="margin-bottom:10px;">
+            <input type="text" id="pve-zorin-user" value="ubuntu" placeholder="Zorin SSH 用户名" class="ui-input persist-field" />
+            <input type="password" id="pve-zorin-pass" placeholder="Zorin SSH 密码 (用于 sudo)" class="ui-input" />
+            <select id="pve-repo-source" class="ui-input persist-field">
+              <option value="official">🌐 PVE 国外官方无订阅源</option>
+              <option value="tsinghua">PVE 清华大学镜像源</option>
+              <option value="ustc">PVE 中科大镜像源</option>
+            </select>
+            <button id="btn-pve-order" class="action-btn">🔢 锁定启动顺序</button>
+          </div>
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button id="btn-pve-host-up" class="action-btn" style="border-color:#f59e0b; color:#fbbf24;">⬆️ 升级 PVE 宿主机</button>
+            <button id="btn-pve-ow-fw" class="action-btn" style="border-color:#38bdf8; color:#7dd3fc;">📦 快照并推送固件升级 OpenWrt</button>
+            <button id="btn-pve-vm-up" class="btn-primary-sm" style="background:#10b981;">📸 快照并安全升级虚拟机</button>
+          </div>
+        </div>
+
+        <div class="card flex-between">
+          <div>
+            <h4 class="card-title" style="color:#a78bfa; margin-bottom:2px;">二、 Zorin OS 一键部署 SubBoost 订阅管理中枢</h4>
+            <p class="sub-text">自动检测并安装 Docker，拉起 SubBoost (8080 端口)，生成聚合订阅喂给 OpenWrt OpenClash/Mihomo</p>
+          </div>
+          <button id="btn-pve-subboost" class="btn-primary-sm" style="background:#8b5cf6;">🚀 部署 SubBoost</button>
+        </div>
+        <pre id="pve-output" class="console" style="height:220px;">等待操作...</pre>
+      </section>
+    </main>
+  </div>
+  <script src="./src/main.js"></script>
+</body>
+</html>

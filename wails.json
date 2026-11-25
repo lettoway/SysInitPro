@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "SysInitPro",
+  "outputfilename": "SysInitPro",
+  "assetdir": "frontend",
+  "frontend:install": "",
+  "frontend:build": "",
+  "wailsjsdir": "./frontend",
+  "info": { "companyName": "SysInitPro", "productName": "SysInitPro", "productVersion": "9.0.0" }
+}
