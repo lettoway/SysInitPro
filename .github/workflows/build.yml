@@ -84,22 +84,47 @@ jobs:
         with:
           path: artifacts
 
-      - name: Generate Release Notes from Git Commits
+      - name: Generate Categorized Release Notes
         shell: bash
         run: |
-          CUR_TAG="${GITHUB_REF_NAME}"
+          CUR_TAG="${GITHUB_REF_NAME:-v10.0.0}"
           PREV_TAG=$(git describe --tags --abbrev=0 "${CUR_TAG}^" 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            git log "${PREV_TAG}..HEAD" --pretty=format:"%s (%h)" --no-merges > commits.txt
+          else
+            git log -n 30 --pretty=format:"%s (%h)" --no-merges > commits.txt
+          fi
+
           {
             echo "## 🚀 SysInitPro ${CUR_TAG}"
             echo ""
-            echo "### 📝 更新记录"
-            if [ -n "$PREV_TAG" ]; then
-              git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges
-            else
-              git log -n 20 --pretty=format:"- %s (%h)" --no-merges
+
+            append_cat() {
+              local title="$1"
+              local pattern="$2"
+              local matches
+              matches=$(grep -E "$pattern" commits.txt || true)
+              if [ -n "$matches" ]; then
+                echo "### ${title}"
+                echo "$matches" | sed 's/^/- /'
+                echo ""
+              fi
+            }
+
+            append_cat "✨ 新特性" "^feat(\([^)]+\))?!?: "
+            append_cat "🐛 问题修复" "^fix(\([^)]+\))?!?: "
+            append_cat "⚡ 性能优化与重构" "^(perf|refactor)(\([^)]+\))?!?: "
+            append_cat "📚 文档与界面调整" "^(docs|style)(\([^)]+\))?!?: "
+            append_cat "🔧 工程维护与构建" "^(ci|chore|build|test|release)(\([^)]+\))?!?: "
+
+            OTHER=$(grep -Ev "^(feat|fix|perf|refactor|docs|style|ci|chore|build|test|release)(\([^)]+\))?!?: " commits.txt || true)
+            if [ -n "$OTHER" ]; then
+              echo "### 📝 其他变更"
+              echo "$OTHER" | sed 's/^/- /'
+              echo ""
             fi
-            echo ""
-            echo ""
+
             echo "### 📦 平台产物"
             echo "- **Windows (amd64)**: \`SysInitPro-Windows-amd64.exe\`"
             echo "- **Linux (amd64)**: \`SysInitPro-Linux-amd64\`"
