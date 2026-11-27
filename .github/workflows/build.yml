@@ -76,16 +76,43 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Generate Release Notes from Git Commits
+        shell: bash
+        run: |
+          CUR_TAG="${GITHUB_REF_NAME}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CUR_TAG}^" 2>/dev/null || echo "")
+          {
+            echo "## 🚀 SysInitPro ${CUR_TAG}"
+            echo ""
+            echo "### 📝 更新记录"
+            if [ -n "$PREV_TAG" ]; then
+              git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges
+            else
+              git log -n 20 --pretty=format:"- %s (%h)" --no-merges
+            fi
+            echo ""
+            echo ""
+            echo "### 📦 平台产物"
+            echo "- **Windows (amd64)**: \`SysInitPro-Windows-amd64.exe\`"
+            echo "- **Linux (amd64)**: \`SysInitPro-Linux-amd64\`"
+            echo "- **macOS (Universal)**: \`SysInitPro-macOS-universal.zip\`"
+          } > release_notes.md
+
       - name: Publish All Platforms to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v9.0.1' }}
-          name: SysInitPro ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v9.0.1' }}
-          body: |
-            SysInitPro v9.0.1：修复独立运行校验误报、无黑框子进程封装、OpenWrt 图形化插件源联动与新版主题
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v10.0.0' }}
+          name: SysInitPro ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v10.0.0' }}
+          body_path: release_notes.md
+          generate_release_notes: true
           files: |
             artifacts/SysInitPro-Windows/SysInitPro-Windows-amd64.exe
             artifacts/SysInitPro-Linux/SysInitPro-Linux-amd64
