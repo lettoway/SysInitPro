@@ -1,222 +1,498 @@
-let currentHW = null, currentMirror = "official", currentRole = "desktop", catalog = [], localSSHHosts = [], selectedIdentityFile = "";
-const goApp = () => window.go.main.App;
+const app = () => window.go?.main?.App;
+let catalog = null;
+const selectedPlugins = new Set();
+const EXT_PREFS_KEY = 'sysinitpro_v10_prefs_v1';
 
-function escapeHtml(s) {
-  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+function $(id) { return document.getElementById(id); }
 
-function waitForWails() {
-  return new Promise(r => { const c = () => (window.go && window.go.main && window.go.main.App) ? r() : setTimeout(c, 50); c(); });
-}
-
-async function restoreUIState() {
+function loadLocalPrefs() {
   try {
-    const st = await goApp().LoadUIState();
-    if (!st) return;
-    document.querySelectorAll('.persist-field').forEach(el => { if (st[el.id] !== undefined) el.value = st[el.id]; });
-  } catch (e) {}
+    return JSON.parse(localStorage.getItem(EXT_PREFS_KEY) || '{}');
+  } catch (_) {
+    return {};
+  }
 }
 
-function bindUIStatePersistence() {
-  document.querySelectorAll('.persist-field').forEach(el => {
-    el.addEventListener('change', () => {
-      const st = {};
-      document.querySelectorAll('.persist-field').forEach(f => { st[f.id] = f.value; });
-      goApp().SaveUIState(st).catch(() => {});
-    });
+function saveLocalPrefs(patch) {
+  try {
+    const cur = loadLocalPrefs();
+    localStorage.setItem(EXT_PREFS_KEY, JSON.stringify({ ...cur, ...patch }));
+  } catch (_) {}
+}
+
+function appendLog(line) {
+  const el = $('v10-log-console');
+  if (!el) return;
+  el.textContent += (el.textContent ? '\n' : '') + line;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setTaskUI(state, text) {
+  const badge = $('task-badge');
+  badge.className = 'status-pill ' + state;
+  badge.textContent = text;
+  const running = state === 'running';
+  $('btn-owrt-build').disabled = running;
+  $('btn-owrt-cancel').disabled = !running;
+}
+
+// --- 高危操作二次确认 ---
+let pendingDangerFn = null;
+function confirmDangerAction(title, desc, fn) {
+  $('confirm-title').textContent = '⚠️ ' + title;
+  $('confirm-desc').textContent = desc;
+  pendingDangerFn = fn;
+  $('confirm-modal').style.display = 'flex';
+}
+$('btn-confirm-cancel')?.addEventListener('click', () => {
+  pendingDangerFn = null;
+  $('confirm-modal').style.display = 'none';
+});
+$('btn-confirm-ok')?.addEventListener('click', async () => {
+  const fn = pendingDangerFn;
+  pendingDangerFn = null;
+  $('confirm-modal').style.display = 'none';
+  if (fn) await fn();
+});
+
+// --- 标签页切换 ---
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $(btn.dataset.tab).classList.add('active');
+  });
+});
+
+// --- OpenWrt 逻辑 ---
+function getActiveFeeds() {
+  const feeds = new Set(['official']);
+  document.querySelectorAll('#owrt-feeds-box input[type="checkbox"]').forEach(cb => {
+    if (cb.checked) feeds.add(cb.value);
+  });
+  return feeds;
+}
+
+function getVisiblePlugins() {
+  if (!catalog) return [];
+  const activeFeeds = getActiveFeeds();
+  const kw = ($('owrt-search')?.value || '').trim().toLowerCase();
+  const onlySel = $('owrt-only-selected')?.checked;
+  const seen = new Set();
+  return catalog.plugins.filter(p => {
+    if (!activeFeeds.has(p.feed)) return false;
+    if (seen.has(p.id)) return false;
+    seen.add(p.id);
+    if (onlySel && !selectedPlugins.has(p.id)) return false;
+    if (kw && !p.id.toLowerCase().includes(kw) && !p.name.toLowerCase().includes(kw) && !p.desc.toLowerCase().includes(kw)) {
+      return false;
+    }
+    return true;
   });
 }
 
-function renderRoleOptimizations(role) {
-  const c = document.getElementById('dynamic-opt-card');
-  c.innerHTML = role === 'server'
-    ? `<h4 class="card-title" style="color:#38bdf8;">🖧 服务器内核调优</h4>
-       <label class="inline-check"><input type="checkbox" class="opt-item" value="srv_bbr" checked /> 开启 TCP BBR 与 IP 转发</label> &nbsp;
-       <label class="inline-check"><input type="checkbox" class="opt-item" value="srv_limits" checked /> 提升 ulimit 65535</label> &nbsp;
-       <label class="inline-check"><input type="checkbox" class="opt-item" value="srv_ssh_harden" checked /> 安装 Fail2Ban</label>`
-    : `<h4 class="card-title" style="color:#34d399;">🖥️ 桌面性能调优</h4>
-       <label class="inline-check"><input type="checkbox" class="opt-item" value="desk_perf" checked /> 卓越/高性能电源模式</label> &nbsp;
-       <label class="inline-check"><input type="checkbox" class="opt-item" value="desk_telemetry" checked /> 关闭冗余遥测与显示后缀</label> &nbsp;
-       <label class="inline-check"><input type="checkbox" class="opt-item" value="desk_multimedia" checked /> 补齐中文字体与解码库</label>`;
-}
-
-async function loadLocalSSHHosts() {
+async function refreshConflictBanner() {
+  const box = $('owrt-conflict-banner');
+  if (!box || !app()?.V10CheckOpenWrtConflicts) return;
   try {
-    localSSHHosts = (await goApp().ListSSHHosts()) || [];
-    document.getElementById('ssh-host-select').innerHTML = `<option value="">-- 选择 ~/.ssh/config 主机 (${localSSHHosts.length}) --</option>` +
-      localSSHHosts.map((h, i) => `<option value="${i}">${escapeHtml(h.alias)} (${escapeHtml(h.user)}@${escapeHtml(h.hostname)}:${escapeHtml(h.port)})</option>`).join('');
-  } catch (e) {}
+    const list = await app().V10CheckOpenWrtConflicts(collectFirmwareConfig());
+    if (!list || list.length === 0) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    const hasErr = list.some(c => c.level === 'error');
+    box.style.display = 'block';
+    box.style.background = hasErr ? 'rgba(239,68,68,0.14)' : 'rgba(245,158,11,0.14)';
+    box.style.border = hasErr ? '1px solid rgba(239,68,68,0.5)' : '1px solid rgba(245,158,11,0.5)';
+    box.style.color = hasErr ? '#fca5a5' : '#fde68a';
+    box.innerHTML = list.map(c =>
+      `<div><strong>${c.level === 'error' ? '🔴' : '🟡'} ${c.title}：</strong>${c.message}</div>`
+    ).join('');
+  } catch (_) {}
 }
 
-window.addEventListener('DOMContentLoaded', async () => {
-  document.querySelectorAll('.nav-btn').forEach(btn => {
+function renderPlugins() {
+  if (!catalog) return;
+  const grid = $('owrt-plugin-grid');
+  const activeFeeds = getActiveFeeds();
+  const feedTotal = catalog.plugins.filter(p => activeFeeds.has(p.feed));
+  const feedIds = new Set(feedTotal.map(p => p.id));
+  for (const id of Array.from(selectedPlugins)) {
+    if (!feedIds.has(id)) selectedPlugins.delete(id);
+  }
+  const visible = getVisiblePlugins();
+  $('owrt-count-sel').textContent = selectedPlugins.size;
+  $('owrt-count-all').textContent = feedTotal.length;
+
+  grid.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  visible.forEach(p => {
+    const on = selectedPlugins.has(p.id);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'plugin-card' + (on ? ' active' : '');
+    btn.innerHTML = `
+      <div class="p-top"><span>${on ? '✅ ' : '⬜ '}${p.name}</span><span class="p-tag">${p.feed}</span></div>
+      <div style="font-size:11px;color:#64748b;font-family:Consolas,monospace;margin:2px 0 4px;">${p.id}</div>
+      <div class="p-desc">${p.desc}</div>
+    `;
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.nav-btn, .step-panel').forEach(el => el.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(`step-${btn.dataset.step}`).classList.add('active');
+      if (selectedPlugins.has(p.id)) selectedPlugins.delete(p.id);
+      else selectedPlugins.add(p.id);
+      renderPlugins();
     });
+    frag.appendChild(btn);
   });
-  renderRoleOptimizations(currentRole);
-  await waitForWails();
-  await restoreUIState();
-  bindUIStatePersistence();
+  grid.appendChild(frag);
+  refreshConflictBanner();
+}
 
-  const mirrors = await goApp().GetAvailableMirrors();
-  const sel = document.getElementById('mirror-select');
-  sel.innerHTML = mirrors.map(m => `<option value="${escapeHtml(m.base_url)}">${escapeHtml(m.name)}</option>`).join('');
-  sel.addEventListener('change', e => currentMirror = e.target.value);
+function collectFirmwareConfig() {
+  return {
+    target: $('owrt-target').value,
+    branch: $('owrt-branch').value,
+    lanIP: $('owrt-ip').value.trim() || '192.168.100.1',
+    rootPassword: $('owrt-pass').value.trim(),
+    theme: $('owrt-theme').value,
+    gitMirror: $('owrt-mirror').value.trim(),
+    feeds: Array.from(getActiveFeeds()),
+    plugins: Array.from(selectedPlugins)
+  };
+}
 
-  catalog = await goApp().GetSoftwareCatalog();
-  await loadLocalSSHHosts();
+async function initV10() {
+  if (!app()) return;
+  window.runtime?.EventsOn?.('v10:log', (line) => appendLog(line));
 
-  try {
-    currentHW = await goApp().ScanHardware();
-    document.getElementById('os-badge').innerText = `${(currentHW.os_platform || 'OS').toUpperCase()} · ${(currentHW.os_role || 'desktop').toUpperCase()}`;
-    if (currentHW.os_role) { currentRole = currentHW.os_role; document.getElementById('os-role-select').value = currentRole; renderRoleOptimizations(currentRole); }
-    document.getElementById('hw-card').innerHTML = `<div class="grid-3">
-      <p><b>系统：</b>${escapeHtml(currentHW.os_version)} [${escapeHtml(currentHW.activation_status)}]</p>
-      <p><b>CPU：</b>${escapeHtml(currentHW.cpu)}</p><p><b>GPU：</b>${escapeHtml(currentHW.gpu)}</p>
-      <p><b>主板：</b>${escapeHtml(currentHW.motherboard)}</p><p><b>网卡：</b>${escapeHtml(currentHW.network_card)}</p>
+  catalog = await app().V10GetOpenWrtCatalog();
+  const saved = await app().V10LoadConfig();
+  const tpls = await app().V10GetStructTemplates();
+  const prefs = loadLocalPrefs();
+
+  $('pve-cluster-json').value = prefs.pveJson || JSON.stringify(tpls.pve, null, 2);
+  $('vps-sec-json').value = prefs.vpsJson || JSON.stringify(tpls.vps, null, 2);
+  if (prefs.ghRepo) $('gh-repo').value = prefs.ghRepo;
+
+  if (app().V10LoadSecret) {
+    const savedTok = await app().V10LoadSecret('ghToken');
+    if (savedTok) $('gh-token').value = savedTok;
+  }
+
+  $('owrt-target').innerHTML = catalog.targets.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+  $('owrt-branch').innerHTML = catalog.branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+  $('owrt-theme').innerHTML = catalog.themes.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+
+  const feedsBox = $('owrt-feeds-box');
+  feedsBox.innerHTML = '<span style="font-weight:600;">第三方插件源：</span>' + catalog.feeds.map(f => {
+    const checked = saved?.openwrt?.feeds?.length
+      ? saved.openwrt.feeds.includes(f.id)
+      : f.id === 'kenzok8';
+    return `<label><input type="checkbox" value="${f.id}" ${checked ? 'checked' : ''} /> ${f.name}</label>`;
+  }).join('');
+  feedsBox.querySelectorAll('input').forEach(cb => cb.addEventListener('change', renderPlugins));
+
+  if (saved?.openwrt?.target) $('owrt-target').value = saved.openwrt.target;
+  if (saved?.openwrt?.branch) $('owrt-branch').value = saved.openwrt.branch;
+  if (saved?.openwrt?.theme) $('owrt-theme').value = saved.openwrt.theme;
+  $('owrt-ip').value = saved?.openwrt?.lanIP || '192.168.100.1';
+  $('owrt-pass').value = saved?.openwrt?.rootPassword || '';
+  $('owrt-mirror').value = saved?.openwrt?.gitMirror || '';
+
+  if (saved?.openwrt?.plugins?.length) {
+    saved.openwrt.plugins.forEach(id => selectedPlugins.add(id));
+  } else {
+    catalog.plugins.filter(p => p.defaultOn && p.feed !== 'istore').forEach(p => selectedPlugins.add(p.id));
+  }
+
+  if (saved?.pveHost) $('pve-host').value = saved.pveHost;
+  if (saved?.pveUser) $('pve-user').value = saved.pveUser;
+
+  renderPlugins();
+}
+
+// --- Tab 1: 系统初始化事件 ---
+function renderHardwareCards(hw) {
+  const box = $('hw-cards');
+  if (!box || !hw || typeof hw !== 'object') return;
+  const entries = Object.entries(hw).filter(([_, v]) => v !== '' && v !== null && v !== undefined);
+  if (entries.length === 0) { box.innerHTML = ''; return; }
+  box.innerHTML = entries.slice(0, 6).map(([k, v]) => {
+    const valStr = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return `<div style="background:#0f172a;border:1px solid var(--border);border-radius:8px;padding:10px;">
+      <div style="font-size:11px;color:var(--muted);">${k}</div>
+      <div style="font-size:13px;font-weight:600;margin-top:4px;word-break:break-all;">${valStr}</div>
     </div>`;
-  } catch (e) { document.getElementById('hw-card').innerText = "硬件扫描失败: " + e; }
-  renderCatalog();
+  }).join('');
+}
 
-  if (window.runtime && window.runtime.EventsOn) {
-    window.runtime.EventsOn("task:progress", d => {
-      if (d.percent >= 0) document.getElementById('progress-bar').style.width = `${d.percent}%`;
-      if (d.percent >= 100) { const b = document.getElementById('btn-start'); b.disabled = false; b.innerText = "🚀 立即在本机执行初始化流水线"; }
-      const el = document.getElementById('log-console');
-      el.textContent += `\n${d.percent >= 0 ? `[${d.percent}%] ` : ""}${d.message}`;
-      el.scrollTop = el.scrollHeight;
-    });
-    window.runtime.EventsOn("openwrt:log", msg => {
-      const box = document.getElementById('ow-script-preview'); box.style.display = 'block'; box.textContent += `\n${msg}`; box.scrollTop = box.scrollHeight;
-    });
+$('btn-scan-hw').addEventListener('click', async () => {
+  $('sysinit-console').textContent = '正在扫描本机硬件信息...';
+  try {
+    const hw = await app().V10ScanHardware();
+    renderHardwareCards(hw);
+    $('sysinit-console').textContent = JSON.stringify(hw, null, 2);
+  } catch (e) { $('sysinit-console').textContent = '[FAIL] ' + e; }
+});
+
+$('btn-preflight').addEventListener('click', async () => {
+  $('sysinit-console').textContent = '正在执行环境预检...';
+  const res = await app().V10RunPreflight();
+  $('sysinit-console').textContent = JSON.stringify(res, null, 2);
+});
+
+$('btn-scan-patches').addEventListener('click', async () => {
+  $('sysinit-console').textContent = '正在扫描系统可用补丁...';
+  try {
+    const list = await app().V10ScanPatches();
+    $('sysinit-console').textContent = JSON.stringify(list, null, 2);
+  } catch (e) { $('sysinit-console').textContent = '[FAIL] ' + e; }
+});
+
+$('btn-install-patches').addEventListener('click', async () => {
+  $('sysinit-console').textContent = '正在安装安全补丁（请稍候）...';
+  $('sysinit-console').textContent = await app().V10InstallPatches(true);
+});
+
+$('btn-install-runtimes').addEventListener('click', async () => {
+  $('sysinit-console').textContent = '正在安装系统运行库...';
+  $('sysinit-console').textContent = await app().V10InstallRuntimes();
+});
+
+$('btn-bench-mirrors').addEventListener('click', async () => {
+  $('sysinit-console').textContent = '正在测速最优镜像节点...';
+  const best = await app().V10BenchmarkMirrors();
+  $('sysinit-console').textContent = '最优镜像节点:\n' + JSON.stringify(best, null, 2);
+});
+
+$('btn-search-soft').addEventListener('click', async () => {
+  const kw = $('soft-keyword').value.trim();
+  if (!kw) return;
+  $('soft-console').textContent = '正在搜索 ' + kw + ' ...';
+  try {
+    $('soft-console').textContent = await app().V10SearchSoftware(kw);
+  } catch (e) { $('soft-console').textContent = '[FAIL] ' + e; }
+});
+
+// --- Tab 2: OpenWrt 事件 ---
+$('owrt-search').addEventListener('input', renderPlugins);
+$('owrt-only-selected').addEventListener('change', renderPlugins);
+$('owrt-branch').addEventListener('change', refreshConflictBanner);
+
+async function runFeedSync(allowPrompt) {
+  const btn = $('btn-sync-feeds');
+  btn.disabled = true; btn.textContent = '⏳ 同步中...';
+  appendLog('>>> 正在同步官方/KenzoK8/iStore 全量插件索引...');
+  try {
+    const token = ($('gh-token')?.value || '').trim();
+    if (app().V10SaveSecret) await app().V10SaveSecret('ghToken', token);
+    const res = await app().V10SyncOpenWrtFeeds(token);
+    if (res.ok && res.plugins) {
+      catalog.plugins = res.plugins;
+      renderPlugins();
+      appendLog('[OK] ' + res.message);
+    } else {
+      appendLog('[FAIL] 同步失败: ' + (res.message || '未知错误'));
+    }
+    if (res.rateLimited && allowPrompt) {
+      $('modal-gh-token').value = token;
+      $('token-modal').style.display = 'flex';
+    }
+  } catch (e) {
+    appendLog('[FAIL] 前端调用异常: ' + String(e));
+  } finally {
+    btn.disabled = false; btn.textContent = '🔄 同步全量插件库';
+  }
+}
+
+$('btn-sync-feeds').addEventListener('click', () => runFeedSync(true));
+$('btn-modal-cancel').addEventListener('click', () => { $('token-modal').style.display = 'none'; });
+$('btn-open-gh-token')?.addEventListener('click', () => {
+  const url = 'https://github.com/settings/tokens/new?description=SysInitPro-v10';
+  if (window.runtime?.BrowserOpenURL) window.runtime.BrowserOpenURL(url);
+  else window.open(url, '_blank');
+});
+$('btn-modal-retry').addEventListener('click', async () => {
+  const t = $('modal-gh-token').value.trim();
+  if (!t) { $('modal-gh-token').focus(); return; }
+  $('gh-token').value = t;
+  if (app().V10SaveSecret) await app().V10SaveSecret('ghToken', t);
+  $('token-modal').style.display = 'none';
+  runFeedSync(false);
+});
+
+$('btn-gh-push').addEventListener('click', async () => {
+  const btn = $('btn-gh-push'); btn.disabled = true;
+  const repo = $('gh-repo').value.trim();
+  const token = $('gh-token').value.trim();
+  saveLocalPrefs({ ghRepo: repo });
+  if (app().V10SaveSecret) await app().V10SaveSecret('ghToken', token);
+  appendLog('>>> 正在推送编译配置至 GitHub Actions...');
+  try {
+    appendLog(await app().V10PushOpenWrtGitHub(repo, token, collectFirmwareConfig()));
+  } finally { btn.disabled = false; }
+});
+
+$('btn-owrt-all').addEventListener('click', () => { getVisiblePlugins().forEach(p => selectedPlugins.add(p.id)); renderPlugins(); });
+$('btn-owrt-clear').addEventListener('click', () => { selectedPlugins.clear(); renderPlugins(); });
+
+$('btn-owrt-save').addEventListener('click', async () => {
+  saveLocalPrefs({
+    ghRepo: $('gh-repo').value.trim(),
+    pveJson: $('pve-cluster-json').value,
+    vpsJson: $('vps-sec-json').value
+  });
+  if (app().V10SaveSecret) await app().V10SaveSecret('ghToken', $('gh-token').value.trim());
+  await app().V10SaveConfig({
+    openwrt: collectFirmwareConfig(),
+    pveHost: $('pve-host').value.trim(),
+    pveUser: $('pve-user').value.trim() || 'root'
+  });
+  appendLog('[OK] 当前配置已保存到本地（Token 已加密存储）');
+});
+
+$('btn-owrt-preview').addEventListener('click', async () => {
+  const bundle = await app().V10PreviewOpenWrtBundle(collectFirmwareConfig());
+  $('preview-card').style.display = 'block';
+  $('preview-console').textContent = `=== diy-part1.sh ===\n${bundle.diyPart1}\n=== diy-part2.sh ===\n${bundle.diyPart2}\n=== diff.config ===\n${bundle.dotConfig}`;
+});
+
+$('btn-close-preview').addEventListener('click', () => { $('preview-card').style.display = 'none'; });
+$('btn-clear-log').addEventListener('click', () => { $('v10-log-console').textContent = ''; });
+
+$('btn-owrt-build').addEventListener('click', async () => {
+  const cfg = collectFirmwareConfig();
+  await app().V10SaveConfig({ openwrt: cfg, pveHost: $('pve-host').value.trim(), pveUser: $('pve-user').value.trim() || 'root' });
+  $('v10-log-console').textContent = '>>> 正在初始化 v10 编译引擎...\n';
+  setTaskUI('running', '编译中...');
+  try {
+    const res = await app().V10StartOpenWrtBuild(cfg);
+    appendLog(res);
+    setTaskUI(res.startsWith('[OK]') ? 'success' : 'failed', res.startsWith('[OK]') ? '完成' : '失败');
+  } catch (e) { appendLog('[FAIL] ' + String(e)); setTaskUI('failed', '异常'); }
+});
+
+$('btn-owrt-cancel').addEventListener('click', async () => {
+  if (await app().V10CancelTask()) { appendLog('⚠️ 已发送中止信号...'); setTaskUI('canceled', '已中止'); }
+});
+
+// --- Tab 3: PVE 体检与编排事件 ---
+$('btn-pve-probe').addEventListener('click', async () => {
+  const btn = $('btn-pve-probe'); btn.disabled = true;
+  $('pve-result').textContent = '正在连接并探测主机状态（最多 10 秒）...';
+  try {
+    const res = await app().V10ProbePVE($('pve-host').value, $('pve-user').value, $('pve-pass').value);
+    $('pve-result').textContent = res.ok ? `[OK] 连接成功（耗时 ${res.latency}）\n${res.summary}` : `[FAIL] ${res.error}`;
+  } finally { btn.disabled = false; }
+});
+
+$('btn-pve-fill-from-ssh')?.addEventListener('click', () => {
+  try {
+    const cur = JSON.parse($('pve-cluster-json').value || '{}');
+    const rawHost = $('pve-host').value.trim();
+    const parts = rawHost.split(':');
+    cur.Host = parts[0] || cur.Host || '';
+    if (parts[1] && Number(parts[1]) > 0) cur.Port = Number(parts[1]);
+    cur.User = $('pve-user').value.trim() || cur.User || 'root';
+    if ($('pve-pass').value) cur.Password = $('pve-pass').value;
+    $('pve-cluster-json').value = JSON.stringify(cur, null, 2);
+    saveLocalPrefs({ pveJson: $('pve-cluster-json').value });
+    $('pve-orch-console').textContent = '[OK] 已将上方 SSH 连接信息同步至编排配置';
+  } catch (e) { $('pve-orch-console').textContent = '[FAIL] ' + e; }
+});
+
+async function runPVEAction(fn, label) {
+  $('pve-orch-console').textContent = `正在执行 ${label}...`;
+  try {
+    const cfg = JSON.parse($('pve-cluster-json').value);
+    saveLocalPrefs({ pveJson: $('pve-cluster-json').value });
+    $('pve-orch-console').textContent = await fn(cfg);
+  } catch (e) { $('pve-orch-console').textContent = '[FAIL] ' + e; }
+}
+
+$('btn-pve-upgrade-host').addEventListener('click', () => confirmDangerAction(
+  '确认升级 PVE 宿主机',
+  '即将对目标 PVE 宿主机执行系统升级（可能触发内核更新），请确认已备份关键虚拟机。',
+  () => runPVEAction(c => app().V10UpgradePVEHost(c), '升级 PVE 宿主机')
+));
+$('btn-pve-boot-order').addEventListener('click', () => runPVEAction(c => app().V10ConfigurePVEBootOrder(c), '配置 VM 启动顺序'));
+$('btn-pve-upgrade-vms').addEventListener('click', () => confirmDangerAction(
+  '确认安全升级虚拟机',
+  '即将按配置对集群内虚拟机执行批量更新，请确认业务窗口允许短暂重启。',
+  () => runPVEAction(c => app().V10SafeUpgradePVEVMs(c), '安全升级虚拟机')
+));
+
+// --- Tab 4: Sing-box 与 VPS 安全事件 ---
+$('btn-sb-parse').addEventListener('click', async () => {
+  const uri = $('sb-uri').value.trim();
+  if (!uri) return;
+  $('sb-console').textContent = '正在解析节点并生成 Sing-box JSON...';
+  try {
+    const parsed = await app().V10ParseSingboxURI(uri);
+    const jsonStr = await app().V10GenerateSingboxJSON(parsed);
+    $('sb-console').textContent = jsonStr;
+  } catch (e) { $('sb-console').textContent = '[FAIL] ' + e; }
+});
+
+$('btn-sb-copy')?.addEventListener('click', async () => {
+  const txt = $('sb-console').textContent;
+  if (!txt || txt.startsWith('等待')) return;
+  try {
+    await navigator.clipboard.writeText(txt);
+    $('sb-console').textContent = txt + '\n\n[OK] 已复制到剪贴板';
+  } catch (_) {}
+});
+
+$('btn-vps-gen').addEventListener('click', async () => {
+  try {
+    const cfg = JSON.parse($('vps-sec-json').value);
+    saveLocalPrefs({ vpsJson: $('vps-sec-json').value });
+    $('vps-console').textContent = await app().V10GenerateVPSSecurity(cfg);
+  } catch (e) { $('vps-console').textContent = '[FAIL] ' + e; }
+});
+
+$('btn-vps-run').addEventListener('click', () => confirmDangerAction(
+  '确认执行 VPS SSH 安全加固',
+  '即将修改远程 VPS 的 SSH 端口/认证策略与防火墙规则，请确认已保留备用登录通道。',
+  async () => {
+    $('vps-console').textContent = '正在通过 SSH 执行 VPS 安全加固...';
+    try {
+      const cfg = JSON.parse($('vps-sec-json').value);
+      saveLocalPrefs({ vpsJson: $('vps-sec-json').value });
+      $('vps-console').textContent = await app().V10RunVPSSSHProvision(cfg);
+    } catch (e) { $('vps-console').textContent = '[FAIL] ' + e; }
+  }
+));
+
+// --- Tab 5: 完整性校验 ---
+$('btn-check-integrity').addEventListener('click', async () => {
+  $('integrity-console').textContent = '正在核验...';
+  $('integrity-console').textContent = await app().CheckCodeIntegrity();
+});
+
+$('btn-refresh-manifest').addEventListener('click', async () => {
+  $('integrity-console').textContent = '正在刷新清单...';
+  $('integrity-console').textContent = await app().RefreshCodeManifest();
+});
+
+window.addEventListener('DOMContentLoaded', initV10);
+$('btn-i18n-fill')?.addEventListener('click', async () => {
+  const btn = $('btn-i18n-fill');
+  btn.disabled = true; btn.textContent = '⏳ 补全中...';
+  appendLog('>>> 正在自动补全缺失插件的中文名与说明...');
+  try {
+    const res = await app().V10TranslateMissingPlugins();
+    if (res.ok && res.plugins) {
+      catalog.plugins = res.plugins;
+      renderPlugins();
+      appendLog('[OK] ' + res.message);
+    } else {
+      appendLog('[FAIL] 补全失败: ' + (res.message || '未知错误'));
+    }
+  } catch (e) {
+    appendLog('[FAIL] ' + String(e));
+  } finally {
+    btn.disabled = false; btn.textContent = '🌐 补全缺失中文';
   }
 });
-
-// ================= 系统补丁扫描与分级安装 =================
-document.getElementById('btn-scan-patches').addEventListener('click', async () => {
-  const box = document.getElementById('patch-console'); box.style.display = 'block';
-  box.textContent = "🔍 正在扫描当前系统缺失的补丁（Windows Update / apt / softwareupdate）...";
-  try {
-    const patches = await goApp().ScanSystemPatches();
-    if (!patches || patches.length === 0) { box.textContent = "✅ 系统已是最新状态，未发现待安装补丁。"; return; }
-    box.textContent = `发现 ${patches.length} 个待安装补丁：\n` + patches.map(p => `[${p.category}] ${p.id} - ${p.title}`).join("\n");
-  } catch (e) { box.textContent = "❌ 扫描失败: " + e; }
-});
-
-document.getElementById('btn-install-patches').addEventListener('click', async () => {
-  const box = document.getElementById('patch-console'); box.style.display = 'block';
-  const secOnly = document.getElementById('chk-sec-only').checked;
-  box.textContent = secOnly ? "⚡ 正在静默安装安全与质量补丁（禁止自动重启）..." : "⚡ 正在安装全部可用系统补丁...";
-  try { box.textContent = await goApp().InstallSystemPatchesNow(secOnly); }
-  catch (e) { box.textContent = "❌ 安装失败: " + e; }
-});
-
-// ================= 常用软件与环境 =================
-function renderCatalog() {
-  const c = document.getElementById('software-list');
-  c.innerHTML = catalog.map((item, idx) => {
-    const chk = ((item.target_role || "all") === "all" || item.target_role === currentRole) ? 'checked' : '';
-    return `<label class="checkbox-card"><input type="checkbox" class="sw-item" value="${escapeHtml(item.id)}" ${chk} />
-      <span><b>${escapeHtml(item.name)}</b><br/><small class="sub-text">${escapeHtml(item.targets.winget || item.targets.apt || item.targets.brew || '')}</small></span>
-      <button type="button" class="del-sw-btn" data-idx="${idx}">✕</button></label>`;
-  }).join('');
-  document.querySelectorAll('.del-sw-btn').forEach(b => b.addEventListener('click', async e => {
-    e.preventDefault(); catalog.splice(parseInt(b.dataset.idx), 1); await goApp().SaveSoftwareCatalog(catalog); renderCatalog();
-  }));
-}
-
-function collectProfile() {
-  return {
-    profile_name: currentRole === "server" ? "服务器生产方案" : "桌面工作站方案",
-    target_os: (currentHW && currentHW.os_platform) ? currentHW.os_platform : "windows",
-    target_role: currentRole,
-    create_backup: document.getElementById('chk-backup').checked,
-    install_drivers: document.getElementById('chk-drivers').checked,
-    auto_update_os: document.getElementById('chk-os-update').checked,
-    security_only: document.getElementById('chk-sec-only').checked,
-    install_runtimes: document.getElementById('chk-runtimes').checked,
-    optimize_options: Array.from(document.querySelectorAll('.opt-item:checked')).map(el => el.value),
-    selected_mirror: currentMirror,
-    software_list: Array.from(document.querySelectorAll('.sw-item:checked')).map(el => catalog.find(i => i.id === el.value)).filter(Boolean),
-    dev_extra: { git_user_name: document.getElementById('dev-git-name').value.trim(), git_user_email: document.getElementById('dev-git-email').value.trim(), git_proxy_port: document.getElementById('dev-git-proxy').value.trim(), docker_mirror_url: document.getElementById('dev-docker-mirror').value.trim(), go_private_domains: document.getElementById('dev-go-private').value.trim() },
-    net_extra: { custom_hostname: document.getElementById('net-hostname').value.trim(), ssh_custom_port: document.getElementById('net-ssh-port').value.trim(), swap_size_gb: parseInt(document.getElementById('net-swap').value || "0"), disable_hibernat: document.getElementById('win-no-hibernate').checked, tailscale_key: document.getElementById('ts-authkey').value.trim(), tailscale_routes: document.getElementById('ts-routes').value.trim(), tailscale_exit: document.getElementById('ts-exit-node').checked }
-  };
-}
-
-document.getElementById('os-role-select').addEventListener('change', e => { currentRole = e.target.value; renderRoleOptimizations(currentRole); renderCatalog(); });
-document.getElementById('btn-toggle-add').addEventListener('click', () => { const p = document.getElementById('add-panel'); p.style.display = p.style.display === 'none' ? 'block' : 'none'; });
-document.getElementById('btn-search-pkg').addEventListener('click', async () => { const b = document.getElementById('search-result'); b.style.display = 'block'; b.textContent = await goApp().SearchPackageByWinget(document.getElementById('search-kw').value); });
-document.getElementById('btn-confirm-add').addEventListener('click', async () => {
-  const name = document.getElementById('new-sw-name').value.trim(); if (!name) return alert("请填名称");
-  catalog.push({ id: name.toLowerCase().replace(/[^a-z0-9]/g, '_'), name, category: document.getElementById('new-sw-cat').value, target_role: currentRole, bin_name: document.getElementById('new-sw-bin').value.trim(), targets: { winget: document.getElementById('new-pkg-winget').value.trim(), brew: document.getElementById('new-pkg-brew').value.trim(), apt: document.getElementById('new-pkg-apt').value.trim(), dnf: document.getElementById('new-pkg-dnf').value.trim(), pacman: document.getElementById('new-pkg-pacman').value.trim() } });
-  await goApp().SaveSoftwareCatalog(catalog); renderCatalog(); document.getElementById('add-panel').style.display = 'none';
-});
-document.getElementById('btn-import-local').addEventListener('click', async () => {
-  try { const list = await goApp().ImportLocalEnvironment(); const ids = new Set(catalog.map(i => i.id)); let n = 0; (list || []).forEach(s => { if (!ids.has(s.id)) { catalog.push(s); n++; } }); await goApp().SaveSoftwareCatalog(catalog); renderCatalog(); alert(`新增 ${n} 个本机软件！`); } catch (e) { alert(e); }
-});
-document.getElementById('btn-activate-key').addEventListener('click', async () => { try { await goApp().ActivateWindowsKey(document.getElementById('win-product-key').value); alert("已提交激活！"); } catch (e) { alert(e); } });
-document.getElementById('btn-retest-mirror').addEventListener('click', async () => { const m = await goApp().GetFastestMirror(); currentMirror = m.base_url; document.getElementById('mirror-select').value = currentMirror; alert(`最快源: ${m.name}`); });
-document.getElementById('btn-preview-playbook').addEventListener('click', async () => { document.getElementById('log-console').textContent = await goApp().PreviewPlaybookScript(collectProfile()); });
-document.getElementById('btn-export-playbook').addEventListener('click', async () => { const p = await goApp().ExportPlaybookScript(collectProfile()); if (p) alert("已保存: " + p); });
-document.getElementById('btn-verify-env').addEventListener('click', async () => { const r = await goApp().VerifyInstalledEnv(collectProfile().software_list); document.getElementById('log-console').textContent = (r || []).join("\n"); });
-document.getElementById('btn-start').addEventListener('click', async () => {
-  const b = document.getElementById('btn-start'); b.disabled = true; b.innerText = "⏳ 执行中...";
-  document.getElementById('log-console').textContent = "启动初始化流水线...";
-  try { await goApp().RunAllTasks(collectProfile(), currentHW); } catch (e) { alert(e); b.disabled = false; b.innerText = "🚀 立即在本机执行初始化流水线"; }
-});
-document.getElementById('btn-export').addEventListener('click', async () => { const p = await goApp().ExportConfigDialog(collectProfile()); if (p) alert("已脱敏导出: " + p); });
-document.getElementById('btn-import').addEventListener('click', async () => { const p = await goApp().ImportConfigDialog(); if (p) alert("已加载: " + p.profile_name); });
-document.getElementById('btn-gist-push').addEventListener('click', async () => { try { const r = await goApp().SyncToGitHubGist(document.getElementById('gist-token').value, document.getElementById('gist-id').value, collectProfile(), catalog); document.getElementById('gist-id').value = r.gist_id; alert("Gist 备份成功: " + r.gist_id); } catch (e) { alert(e); } });
-document.getElementById('btn-gist-pull').addEventListener('click', async () => { try { await goApp().RestoreFromGitHubGist(document.getElementById('gist-token').value, document.getElementById('gist-id').value); catalog = await goApp().GetSoftwareCatalog(); renderCatalog(); alert("Gist 恢复成功！"); } catch (e) { alert(e); } });
-
-// ================= VPS / Sing-box / OpenWrt / PVE =================
-document.getElementById('btn-refresh-hosts').addEventListener('click', loadLocalSSHHosts);
-document.getElementById('ssh-host-select').addEventListener('change', e => {
-  const h = localSSHHosts[parseInt(e.target.value)]; if (!h) return;
-  document.getElementById('vps-alias').value = h.alias; document.getElementById('vps-ip').value = h.hostname;
-  document.getElementById('vps-init-user').value = h.user; document.getElementById('vps-old-port').value = h.port;
-  selectedIdentityFile = h.identity_file || "";
-});
-function getVPSTarget() { return { host: document.getElementById('vps-ip').value.trim(), port: document.getElementById('vps-old-port').value.trim() || "22", user: document.getElementById('vps-init-user').value.trim() || "root", password: document.getElementById('vps-init-pass').value, identity_file: selectedIdentityFile }; }
-function collectVPS() { return { server_alias: document.getElementById('vps-alias').value.trim(), server_ip: document.getElementById('vps-ip').value.trim(), init_user: document.getElementById('vps-init-user').value.trim(), init_password: document.getElementById('vps-init-pass').value, old_ssh_port: document.getElementById('vps-old-port').value.trim(), new_ssh_port: document.getElementById('vps-new-port').value.trim(), new_user: document.getElementById('vps-new-user').value.trim(), extra_ports: document.getElementById('vps-extra-ports').value.trim(), disable_root: document.getElementById('vps-no-root').checked, disable_pass: document.getElementById('vps-no-pass').checked, enable_ufw: document.getElementById('vps-ufw').checked }; }
-document.getElementById('btn-vps-preview').addEventListener('click', async () => { const b = document.getElementById('vps-output'); b.style.display = 'block'; b.textContent = await goApp().PreviewVPSSecurityScript(collectVPS()); });
-document.getElementById('btn-vps-run').addEventListener('click', async () => { const b = document.getElementById('vps-output'); b.style.display = 'block'; b.textContent = "正在加固..."; try { b.textContent = await goApp().ExecuteVPSSecurityHardening(collectVPS()); loadLocalSSHHosts(); } catch (e) { b.textContent = "❌ " + e; } });
-document.getElementById('btn-vps-status').addEventListener('click', async () => { const b = document.getElementById('vps-output'); b.style.display = 'block'; try { b.textContent = await goApp().RunVPSRemoteCommand(getVPSTarget(), `uname -a && uptime && free -h && (sudo ufw status 2>/dev/null || true)`); } catch (e) { b.textContent = "❌ " + e; } });
-
-function collectSB() { return { inbound_mode: document.getElementById('sb-in-mode').value, mixed_port: parseInt(document.getElementById('sb-in-port').value || "7890"), allow_lan: document.getElementById('sb-allow-lan').checked, protocol: document.getElementById('sb-proto').value, server_addr: document.getElementById('sb-server').value.trim(), server_port: parseInt(document.getElementById('sb-port').value || "443"), uuid_or_pass: document.getElementById('sb-uuid').value.trim(), flow: "xtls-rprx-vision", sni: document.getElementById('sb-sni').value.trim(), reality_pubkey: document.getElementById('sb-pbk').value.trim(), reality_sid: document.getElementById('sb-sid').value.trim(), hy2_up_mbps: 100, hy2_down_mbps: 200, bypass_cn: document.getElementById('sb-bypass-cn').checked, enable_ai_filter: document.getElementById('sb-ai-filter').checked, use_warp_for_ai: document.getElementById('sb-warp-ai').checked }; }
-document.getElementById('btn-sb-parse').addEventListener('click', async () => { try { const c = await goApp().ParseSingboxURI(document.getElementById('sb-uri-input').value); document.getElementById('sb-proto').value = c.protocol; document.getElementById('sb-server').value = c.server_addr; document.getElementById('sb-port').value = c.server_port; document.getElementById('sb-uuid').value = c.uuid_or_pass; document.getElementById('sb-sni').value = c.sni || ""; document.getElementById('sb-pbk').value = c.reality_pubkey || ""; document.getElementById('sb-sid').value = c.reality_sid || ""; alert("✨ 解析成功！"); } catch (e) { alert(e); } });
-document.getElementById('btn-sb-preview').addEventListener('click', async () => { const b = document.getElementById('sb-preview-box'); b.style.display = 'block'; b.textContent = await goApp().PreviewSingboxConfig(collectSB()); });
-document.getElementById('btn-sb-export').addEventListener('click', async () => { const p = await goApp().ExportSingboxConfig(collectSB()); if (p) alert("已导出: " + p); });
-document.getElementById('btn-sb-deploy').addEventListener('click', async () => { const b = document.getElementById('sb-preview-box'); b.style.display = 'block'; b.textContent = "正在推送部署..."; try { b.textContent = await goApp().DeploySingboxRemote(getVPSTarget(), collectSB()); } catch (e) { b.textContent = "❌ " + e; } });
-
-function collectOW() { return { branch: document.getElementById('ow-branch').value, target_arch: document.getElementById('ow-arch').value, feed_source: document.getElementById('ow-feed').value, third_party: Array.from(document.querySelectorAll('.ow-tp:checked')).map(el => el.value), lan_ip: document.getElementById('ow-ip').value.trim(), hostname: document.getElementById('ow-hostname').value.trim(), default_theme: document.getElementById('ow-theme').value, rootfs_size_mb: 512, selected_pkgs: ["luci-app-ddns", "luci-app-upnp"] }; }
-document.getElementById('btn-ow-preview').addEventListener('click', async () => { const b = await goApp().PreviewOpenWrtScripts(collectOW()); const el = document.getElementById('ow-script-preview'); el.style.display = 'block'; el.textContent = b.diy_part1 + "\n" + b.diy_part2 + "\n" + b.dot_config; });
-document.getElementById('btn-ow-export').addEventListener('click', async () => { const d = await goApp().ExportOpenWrtBundle(collectOW()); if (d) alert("已导出至: " + d); });
-document.getElementById('btn-ow-docker').addEventListener('click', async () => { try { await goApp().StartOpenWrtDockerBuild(collectOW()); } catch (e) { alert(e); } });
-document.getElementById('btn-ow-gh-push').addEventListener('click', async () => { try { const u = await goApp().PushOpenWrtToGitHub({ token: document.getElementById('gh-token').value, repo: document.getElementById('gh-repo').value, branch: "main", fw_config: collectOW() }); alert("云端编译已启动: " + u); } catch (e) { alert(e); } });
-document.getElementById('btn-ow-ssh').addEventListener('click', async () => { const b = document.getElementById('ow-ssh-output'); b.style.display = 'block'; try { b.textContent = await goApp().ProvisionOpenWrtSSH({ host: document.getElementById('ssh-host').value, port: "22", user: "root", password: document.getElementById('ssh-pass').value, feed_source: document.getElementById('ow-feed').value, bypass_mode: document.getElementById('ssh-bypass').checked, main_gateway: document.getElementById('ssh-gw').value, install_pkgs: document.getElementById('ssh-pkgs').value }); } catch (e) { b.textContent = "❌ " + e; } });
-
-function collectPVE() {
-  return {
-    pve_ssh: { host: document.getElementById('pve-host').value.trim(), port: "22", user: "root", password: document.getElementById('pve-pass').value },
-    ikuai_vmid: document.getElementById('pve-ikuai-id').value.trim(),
-    openwrt_vmid: document.getElementById('pve-ow-id').value.trim(),
-    openwrt_ssh: { host: document.getElementById('pve-ow-ip').value.trim(), port: "22", user: "root", password: document.getElementById('pve-ow-pass').value },
-    zorin_vmid: document.getElementById('pve-zorin-id').value.trim(),
-    zorin_ssh: { host: document.getElementById('pve-zorin-ip').value.trim(), port: "22", user: document.getElementById('pve-zorin-user').value.trim() || "ubuntu", password: document.getElementById('pve-zorin-pass').value },
-    repo_source: document.getElementById('pve-repo-source').value
-  };
-}
-document.getElementById('btn-pve-order').addEventListener('click', async () => { const b = document.getElementById('pve-output'); b.textContent = "正在锁定启动顺序..."; try { b.textContent = await goApp().PVEConfigureBootOrder(collectPVE()); } catch (e) { b.textContent = "❌ " + e; } });
-document.getElementById('btn-pve-host-up').addEventListener('click', async () => { const b = document.getElementById('pve-output'); b.textContent = "正在升级 PVE 宿主机..."; try { b.textContent = await goApp().PVEUpgradeHost(collectPVE()); } catch (e) { b.textContent = "❌ " + e; } });
-document.getElementById('btn-pve-vm-up').addEventListener('click', async () => { const b = document.getElementById('pve-output'); b.textContent = "正在快照并升级虚拟机..."; try { b.textContent = await goApp().PVESafeUpgradeVMs(collectPVE()); } catch (e) { b.textContent = "❌ " + e; } });
-document.getElementById('btn-pve-ow-fw').addEventListener('click', async () => { const b = document.getElementById('pve-output'); b.textContent = "请选择 OpenWrt 固件文件（自动打快照 -> 上传 -> sysupgrade -> 探针校验/回滚）..."; try { b.textContent = await goApp().PVEUpgradeOpenWrtFirmwareDialog(collectPVE()); } catch (e) { b.textContent = "❌ " + e; } });
-document.getElementById('btn-pve-subboost').addEventListener('click', async () => { const b = document.getElementById('pve-output'); b.textContent = "正在 Zorin OS 上部署 SubBoost..."; try { b.textContent = await goApp().PVEDeploySubBoost(collectPVE().zorin_ssh); } catch (e) { b.textContent = "❌ " + e; } });
-document.getElementById('btn-check-integrity').addEventListener('click', async () => { const box = document.getElementById('integrity-console'); box.style.display = 'block'; box.textContent = '正在核验...'; try { box.textContent = await goApp().CheckCodeIntegrity(); } catch (e) { box.textContent = '[FAIL] ' + String(e); } });
-
-document.getElementById('btn-refresh-manifest').addEventListener('click', async () => { const box = document.getElementById('integrity-console'); box.style.display = 'block'; box.textContent = '正在刷新基准清单...'; try { box.textContent = await goApp().RefreshCodeManifest(); } catch (e) { box.textContent = '[FAIL] ' + String(e); } });
-
-document.getElementById('btn-check-integrity-step4').addEventListener('click', async () => { const logBox = document.getElementById('log-console'); logBox.textContent = '正在核验...'; try { logBox.textContent = await goApp().CheckCodeIntegrity(); } catch (e) { logBox.textContent = '[FAIL] ' + String(e); } });

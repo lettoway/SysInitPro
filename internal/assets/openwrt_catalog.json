@@ -1,0 +1,39 @@
+{
+  "targets": [
+    { "id": "x86_64", "name": "x86_64 通用软路由 / 虚拟机", "desc": "PVE / ESXi / 工控机" },
+    { "id": "armsr_armv8", "name": "ARM64 通用镜像 (armsr/armv8)", "desc": "ARM 虚拟机 / 树莓派等" },
+    { "id": "rockchip_armv8", "name": "Rockchip ARM64 (R2S/R4S/R5S)", "desc": "瑞芯微系列软路由" }
+  ],
+  "branches": [
+    { "id": "immortalwrt-24.10", "name": "ImmortalWrt 24.10 (推荐 / 新内核)" },
+    { "id": "immortalwrt-23.05", "name": "ImmortalWrt 23.05 (长期稳定版)" },
+    { "id": "openwrt-24.10", "name": "OpenWrt 官方 24.10" },
+    { "id": "lede", "name": "Lean LEDE (传统分支)" }
+  ],
+  "themes": [
+    { "id": "bootstrap", "name": "Bootstrap (官方默认 / 零兼容风险)" },
+    { "id": "kucat", "name": "KuCat (现代拟态 / 适配 23.05 & 24.10)" },
+    { "id": "design", "name": "Design (极简暗黑 / 适配新版 LuCI)" },
+    { "id": "material", "name": "Material (轻量扁平 / 官方内置)" },
+    { "id": "openwrt-2020", "name": "OpenWrt-2020 (官方现代主题)" }
+  ],
+  "feeds": [
+    { "id": "kenzok8", "name": "KenzoK8 (small-package)" },
+    { "id": "istore", "name": "iStore 商店源 (LinkEase)" }
+  ],
+  "plugins": [
+    { "id": "luci-app-ttyd", "name": "TTYD 网页终端", "desc": "浏览器直连路由器 Shell", "feed": "official", "defaultOn": true },
+    { "id": "luci-app-upnp", "name": "UPnP 自动转发", "desc": "游戏机/BT 自动端口映射", "feed": "official", "defaultOn": true },
+    { "id": "luci-app-ddns", "name": "动态域名 DDNS", "desc": "公网 IP 自动更新", "feed": "official", "defaultOn": false },
+    { "id": "luci-app-wol", "name": "网络唤醒 WOL", "desc": "远程开机局域网电脑", "feed": "official", "defaultOn": true },
+    { "id": "luci-app-nlbwmon", "name": "带宽流量监控", "desc": "按设备统计实时流量", "feed": "official", "defaultOn": true },
+    { "id": "luci-app-homeproxy", "name": "HomeProxy", "desc": "Sing-box 新一代代理", "feed": "kenzok8", "defaultOn": true },
+    { "id": "luci-app-passwall", "name": "PassWall", "desc": "经典分流代理", "feed": "kenzok8", "defaultOn": false },
+    { "id": "luci-app-openclash", "name": "OpenClash", "desc": "Mihomo / Clash 核心", "feed": "kenzok8", "defaultOn": false },
+    { "id": "luci-app-mosdns", "name": "MosDNS", "desc": "高性能 DNS 国内外分流", "feed": "kenzok8", "defaultOn": false },
+    { "id": "luci-app-adguardhome", "name": "AdGuardHome", "desc": "全网去广告与 DNS 过滤", "feed": "kenzok8", "defaultOn": false },
+    { "id": "luci-app-store", "name": "iStore 应用商店", "desc": "可视化在线安装插件", "feed": "istore", "defaultOn": true },
+    { "id": "luci-app-quickstart", "name": "QuickStart 首页", "desc": "iStoreOS 风格导航页", "feed": "istore", "defaultOn": false },
+    { "id": "luci-app-dockerman", "name": "DockerMan", "desc": "软路由容器管理界面", "feed": "istore", "defaultOn": false }
+  ]
+}

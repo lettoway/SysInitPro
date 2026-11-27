@@ -322,7 +322,9 @@ func (w *WindowsProvider) ExportInstalledSoftware() ([]core.SoftwareItem, error)
 	}
 	var parsed struct {
 		Sources []struct {
-			Packages []struct{ PackageIdentifier string `json:"PackageIdentifier"` } `json:"Packages"`
+			Packages []struct {
+				PackageIdentifier string `json:"PackageIdentifier"`
+			} `json:"Packages"`
 		} `json:"Sources"`
 	}
 	_ = json.Unmarshal(raw, &parsed)
@@ -334,7 +336,7 @@ func (w *WindowsProvider) ExportInstalledSoftware() ([]core.SoftwareItem, error)
 			}
 			parts := strings.Split(pkg.PackageIdentifier, ".")
 			items = append(items, core.SoftwareItem{
-				ID: strings.ToLower(strings.ReplaceAll(pkg.PackageIdentifier, ".", "_")),
+				ID:   strings.ToLower(strings.ReplaceAll(pkg.PackageIdentifier, ".", "_")),
 				Name: parts[len(parts)-1] + " (本机提取)", Category: "Tool", TargetRole: "desktop",
 				Targets: core.PackageTargets{Winget: pkg.PackageIdentifier},
 			})

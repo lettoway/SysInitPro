@@ -64,7 +64,9 @@ func (d *DarwinProvider) InstallSoftware(item core.SoftwareItem, logFn func(stri
 	}
 	return nil
 }
-func (d *DarwinProvider) ConfigureDevEnvironment(item core.SoftwareItem, mirrorURL string) error { return nil }
+func (d *DarwinProvider) ConfigureDevEnvironment(item core.SoftwareItem, mirrorURL string) error {
+	return nil
+}
 func (d *DarwinProvider) ApplyExtraConfig(dev core.DevEnvExtra, net core.NetworkExtra, role string, logFn func(string)) error {
 	if dev.GitUserName != "" {
 		_, _ = runMacCmd(fmt.Sprintf(`git config --global user.name '%s'`, strings.TrimSpace(dev.GitUserName)))

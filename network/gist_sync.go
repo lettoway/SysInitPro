@@ -73,7 +73,9 @@ func RestoreFromGist(token, gistID string) (string, string, error) {
 		return "", "", fmt.Errorf("读取 Gist 失败 (HTTP %d): %s", resp.StatusCode, string(raw))
 	}
 	var data struct {
-		Files map[string]struct{ Content string `json:"content"` } `json:"files"`
+		Files map[string]struct {
+			Content string `json:"content"`
+		} `json:"files"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return "", "", err
